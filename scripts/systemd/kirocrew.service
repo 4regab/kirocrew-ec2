@@ -1,0 +1,49 @@
+[Unit]
+Description=Kiro Crew gateway (dashboard + Slack + cron)
+Documentation=https://github.com/kirodotdev/KiroCrew
+
+# Ordering and hard dependencies:
+#   kirocrew-storage.service  - Requires, not Wants. If the data volume is not
+#                               mounted the gateway MUST NOT start, otherwise it
+#                               would run against an empty home directory and
+#                               write a fresh, empty state over nothing.
+#   RequiresMountsFor         - belt and braces on the same property.
+#   user@1000.service         - the gateway spawns per-agent transient scopes
+#                               with `systemd-run --user`, which needs the user
+#                               manager and /run/user/1000 to exist. Requires
+#                               `loginctl enable-linger` for the app user.
+After=network-online.target kirocrew-storage.service user@1000.service
+Wants=network-online.target user@1000.service
+Requires=kirocrew-storage.service
+RequiresMountsFor=/home/ec2-user
+
+# StartLimitIntervalSec=0 disables systemd's give-up-after-N-failures logic.
+# The default (burst 3 / interval 300s) means three quick crashes leave the
+# service permanently dead until someone runs `systemctl reset-failed`, which
+# is unacceptable for an always-on workload.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user
+ExecStart="/home/ec2-user/.local/bin/kirocrew" gateway
+
+# Restart=always, not on-failure: a clean exit(0) should also be restarted,
+# because for a gateway any exit at all is an outage.
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+LimitNOFILE=65536
+
+Environment="USER=ec2-user"
+Environment="HOME=/home/ec2-user"
+Environment="PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin:/bin:/home/ec2-user/.local/share/mise/installs/node/20.20.2/bin:/home/ec2-user/bin:/usr/local/sbin:/usr/sbin"
+Environment="LANG=C.UTF-8"
+Environment="LC_ALL=C.UTF-8"
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+Environment="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,29 @@
+[Unit]
+# Recreates the familiar `tmux attach -t kiro` experience without making tmux
+# the process supervisor.
+#
+# WHY NOT run the gateway inside tmux directly:
+#   `tmux new-session -d <cmd>` forks and exits immediately. systemd would then
+#   track the tmux server, not the application, so Restart=always would never
+#   fire when the app crashed inside the pane - the pane would just sit there
+#   dead. Running the app under systemd and pointing tmux at the journal gives
+#   real crash-restart AND an attachable session, plus log history that
+#   survives restarts.
+Description=tmux session 'kiro' tailing the kirocrew gateway journal
+After=kirocrew.service
+Requires=kirocrew.service
+RequiresMountsFor=/home/ec2-user
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=ec2-user
+Group=ec2-user
+Environment="HOME=/home/ec2-user"
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+ExecStart=/usr/bin/tmux new-session -d -s kiro "journalctl -u kirocrew -f -n 200"
+ExecStop=/usr/bin/tmux kill-session -t kiro
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

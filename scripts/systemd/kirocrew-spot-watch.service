@@ -1,0 +1,20 @@
+[Unit]
+Description=Drain kirocrew cleanly on EC2 spot interruption
+After=kirocrew.service
+# Wants, not Requires: the watcher should keep running even if the gateway is
+# temporarily down, so it can still drain storage on an interruption.
+Wants=kirocrew.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/kirocrew-spot-watch.sh
+# The script exits 0 after it has drained. Restart=always is still correct:
+# on any unexpected exit we want the watcher back immediately, and after a
+# real drain the instance is being terminated anyway.
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

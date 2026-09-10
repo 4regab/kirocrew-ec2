@@ -1,0 +1,56 @@
+{
+  "_comment": "aws autoscaling create-auto-scaling-group --cli-input-json file://asg.json. Replace ASG_NAME, LAUNCH_TEMPLATE_NAME, SUBNET_ID and the instance type list. Strip the _comment keys before use. Create with DesiredCapacity 0 so nothing launches until you cut over, then update to Min=1 Max=1 Desired=1.",
+
+  "AutoScalingGroupName": "ASG_NAME",
+
+  "_comment_size": "Min=Max=Desired=1 after cutover. Max MUST be 1: a non-Multi-Attach EBS volume attaches to exactly one instance, so two instances would fight over it (and, for a chat gateway, would open two connections on the same bot token). The cost of Max=1 is that a replacement cannot launch until the old instance is gone, so expect a 2-4 minute gap per interruption. That gap is inherent to single-volume designs, not a bug.",
+  "MinSize": 0,
+  "MaxSize": 1,
+  "DesiredCapacity": 0,
+
+  "_comment_az": "ONE subnet only, in the same AZ as the data volume. Listing more subnets would let the ASG launch in an AZ where the volume cannot be attached.",
+  "VPCZoneIdentifier": "SUBNET_ID",
+
+  "_comment_health": "EC2 health checks are instance-level, not application-level. A booted-but-broken app looks healthy here; that gap is covered by kirocrew-selfheal.service plus the CloudWatch alarm.",
+  "HealthCheckType": "EC2",
+  "HealthCheckGracePeriod": 300,
+
+  "CapacityRebalance": true,
+  "DefaultCooldown": 60,
+
+  "MixedInstancesPolicy": {
+    "LaunchTemplate": {
+      "LaunchTemplateSpecification": {
+        "LaunchTemplateName": "LAUNCH_TEMPLATE_NAME",
+        "Version": "$Latest"
+      },
+      "_comment_overrides": "All entries must share the AMI's architecture and have enough memory for the workload. More types = more capacity pools = faster recovery. Burstable (t3/t3a) types are included as a fallback but will throttle a sustained-CPU workload once credits run out.",
+      "Overrides": [
+        { "InstanceType": "m5.xlarge" },
+        { "InstanceType": "m6i.xlarge" },
+        { "InstanceType": "m6a.xlarge" },
+        { "InstanceType": "m5a.xlarge" },
+        { "InstanceType": "m5n.xlarge" },
+        { "InstanceType": "m5d.xlarge" },
+        { "InstanceType": "m7i.xlarge" },
+        { "InstanceType": "m7a.xlarge" },
+        { "InstanceType": "m6in.xlarge" },
+        { "InstanceType": "t3.xlarge" },
+        { "InstanceType": "t3a.xlarge" },
+        { "InstanceType": "m4.xlarge" }
+      ]
+    },
+    "InstancesDistribution": {
+      "_comment_spot": "100% spot. There is no automatic spot-to-on-demand fallback in an ASG; if you need one you must set OnDemandBaseCapacity to 1, which for a single-instance workload means paying on-demand permanently.",
+      "OnDemandAllocationStrategy": "lowest-price",
+      "OnDemandBaseCapacity": 0,
+      "OnDemandPercentageAboveBaseCapacity": 0,
+      "SpotAllocationStrategy": "price-capacity-optimized"
+    }
+  },
+
+  "Tags": [
+    { "Key": "Name", "Value": "kirocrew", "PropagateAtLaunch": true },
+    { "Key": "ManagedBy", "Value": "kirocrew-asg", "PropagateAtLaunch": true }
+  ]
+}

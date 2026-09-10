@@ -1,0 +1,57 @@
+{
+  "_comment": "Least-privilege policy for the gateway instance. Replace REGION, ACCOUNT_ID, DATA_VOLUME_ID and ASG_NAME. Attach alongside the AWS-managed AmazonSSMManagedInstanceCore policy. Note this box may run agents that execute arbitrary code, so they inherit this role via IMDS - keep it this narrow.",
+
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DescribeForDeviceResolution",
+      "_comment": "Describe* does not support resource-level permissions, so Resource must be *.",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeVolumes",
+        "ec2:DescribeInstances"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AttachDetachOnlyTheDataVolume",
+      "_comment": "Scoped to exactly one volume. The instance ARN wildcard is required because the instance id is not known until launch.",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:AttachVolume",
+        "ec2:DetachVolume"
+      ],
+      "Resource": [
+        "arn:aws:ec2:REGION:ACCOUNT_ID:volume/DATA_VOLUME_ID",
+        "arn:aws:ec2:REGION:ACCOUNT_ID:instance/*"
+      ]
+    },
+    {
+      "Sid": "SelfHealMarkOwnInstanceUnhealthy",
+      "Effect": "Allow",
+      "Action": "autoscaling:SetInstanceHealth",
+      "Resource": "arn:aws:autoscaling:REGION:ACCOUNT_ID:autoScalingGroup:*:autoScalingGroupName/ASG_NAME"
+    },
+    {
+      "Sid": "SelfHealDetectAsgMembership",
+      "Effect": "Allow",
+      "Action": "autoscaling:DescribeAutoScalingInstances",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ExplicitlyDenyDestructiveActions",
+      "_comment": "An explicit Deny cannot be overridden by any Allow. This is the backstop that stops a compromised or buggy agent destroying the data volume or resizing the group.",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:DeleteVolume",
+        "ec2:CreateVolume",
+        "ec2:ModifyVolume",
+        "ec2:DeleteSnapshot",
+        "autoscaling:UpdateAutoScalingGroup",
+        "autoscaling:DeleteAutoScalingGroup",
+        "autoscaling:SetDesiredCapacity"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

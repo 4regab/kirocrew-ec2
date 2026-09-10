@@ -1,0 +1,51 @@
+{
+  "_comment": "aws ec2 create-launch-template --cli-input-json file://launch-template.json. Replace BUILT_AMI, KEY_NAME, INSTANCE_PROFILE_NAME, SECURITY_GROUP_ID, DEFAULT_INSTANCE_TYPE, ROOT_VOLUME_SIZE_GIB. Strip the _comment keys before use.",
+
+  "LaunchTemplateName": "kirocrew-gateway",
+  "VersionDescription": "custom AMI, disposable root, data volume attached at boot by kirocrew-storage.service",
+  "LaunchTemplateData": {
+    "ImageId": "BUILT_AMI",
+    "InstanceType": "DEFAULT_INSTANCE_TYPE",
+    "KeyName": "KEY_NAME",
+    "EbsOptimized": true,
+    "IamInstanceProfile": { "Name": "INSTANCE_PROFILE_NAME" },
+    "SecurityGroupIds": ["SECURITY_GROUP_ID"],
+
+    "_comment_bdm": "ONLY the root device. The data volume must NOT appear here - a block device mapping would create a brand-new empty volume on every launch, which is exactly the duplicate storage this design avoids. It is attached at boot via the EC2 API instead, which also means its attachment defaults to DeleteOnTermination=false.",
+    "BlockDeviceMappings": [
+      {
+        "DeviceName": "/dev/xvda",
+        "Ebs": {
+          "VolumeSize": 8,
+          "VolumeType": "gp3",
+          "DeleteOnTermination": true
+        }
+      }
+    ],
+
+    "MetadataOptions": {
+      "HttpTokens": "required",
+      "HttpEndpoint": "enabled",
+      "HttpPutResponseHopLimit": 2
+    },
+    "Monitoring": { "Enabled": false },
+
+    "_comment_spot": "Do NOT set InstanceMarketOptions here. When the ASG uses a MixedInstancesPolicy it owns the spot configuration, and setting it in both places conflicts.",
+
+    "TagSpecifications": [
+      {
+        "ResourceType": "instance",
+        "Tags": [
+          { "Key": "Name", "Value": "kirocrew" },
+          { "Key": "ManagedBy", "Value": "kirocrew-asg" }
+        ]
+      },
+      {
+        "ResourceType": "volume",
+        "Tags": [
+          { "Key": "Name", "Value": "kirocrew-root-disposable" }
+        ]
+      }
+    ]
+  }
+}

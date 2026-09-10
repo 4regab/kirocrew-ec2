@@ -1,0 +1,25 @@
+[Unit]
+# Attaches and mounts the persistent data volume. Everything else depends on
+# this succeeding. OnFailure hands off to the self-heal unit so the ASG can
+# replace an instance whose storage never came up.
+Description=Attach and mount the kirocrew data volume at /home/ec2-user
+Documentation=https://github.com/kirodotdev/KiroCrew
+After=network-online.target cloud-init.service
+Wants=network-online.target
+Before=kirocrew.service
+OnFailure=kirocrew-selfheal.service
+
+[Service]
+Type=oneshot
+# RemainAfterExit keeps the unit "active" after the script exits, so that
+# Requires= on it in kirocrew.service stays satisfied for the whole boot.
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/kirocrew-storage.sh
+# Generous: the script itself retries attaching for up to 600s, and the device
+# node can take a further ~2 minutes to appear in the worst case.
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

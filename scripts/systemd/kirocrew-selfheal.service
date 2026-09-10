@@ -1,0 +1,13 @@
+[Unit]
+# Reachable ONLY via OnFailure= from kirocrew-storage.service.
+# Note there is deliberately no [Install] section: this unit must never be
+# enabled or started at boot. `systemctl is-enabled` reports it as "static".
+Description=Mark this instance Unhealthy so the ASG replaces it after a kirocrew storage failure
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kirocrew-selfheal.sh
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal
