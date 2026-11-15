@@ -24,7 +24,7 @@ duplicate storage.
                     │  Launch template → custom AMI      │
                     │  • OS packages + toolchain         │
                     │  • 4 enabled systemd units         │
-                    │  • disposable 8 GiB root           │
+                    │  • disposable 20 GiB root          │
                     └──────────────┬─────────────────────┘
                                    │ on every boot
                                    ▼
@@ -51,18 +51,25 @@ duplicate storage.
 
 ### 1. An EBS volume attaches to one instance, and lives in one AZ
 
-Non-Multi-Attach EBS is single-writer, which forces `MaxSize=1`. That in turn
-means a replacement **cannot** launch before the old instance is gone, so a gap
-is unavoidable. Capacity Rebalancing normally pre-launches a replacement, but
-that needs `MaxSize > DesiredCapacity`, which would allow two instances to fight
-over the volume — and, for a chat gateway, open two connections on one bot
-token.
+Non-Multi-Attach EBS is single-writer, which forces `MaxSize=1`. A replacement
+for an interrupted instance therefore cannot take over before the old instance
+lets go of the volume, so a gap is unavoidable.
+
+Capacity Rebalancing is enabled in `templates/asg.json`. When the old instance
+gets a rebalance recommendation, the ASG may launch a replacement **while the
+old instance is still running**, briefly going over `MaxSize`. So two instances
+can exist for a minute or two. Only one of them ever holds the volume: the new
+instance's storage unit refuses to take the volume from a running holder and
+keeps retrying (constraint 4). The ASG terminates the old instance once the new
+one passes its EC2 health check, and the new one then takes the volume. For a
+chat gateway this matters: the gateway cannot start without the volume, so two
+connections on one bot token never happen.
 
 The volume also cannot cross AZs, so the ASG must be pinned to a single subnet.
 Zero downtime would require a second AZ, a second volume and replication between
 them. That is a different, much larger design.
 
-**Consequence to accept: 2-4 minutes of downtime per interruption.**
+**Consequence to accept: about 3-8 minutes of downtime per interruption.**
 
 ### 2. A root volume cannot be re-attached to a replacement
 
@@ -99,8 +106,8 @@ Creating the data volume fresh and formatting it gives it a random UUID, so the
 collision cannot occur. No `-o nouuid`, no boot-time ambiguity, and no need to
 rewrite a UUID on a disk holding live data.
 
-This was verified empirically: on a replacement instance, the root is
-`91121373-…` and the data volume is a different UUID entirely.
+This was verified empirically: on a replacement instance, `lsblk -o NAME,UUID`
+shows different UUIDs for the root and the data volume.
 
 ### 4. The replacement boots while the old instance may still hold the volume
 
@@ -177,11 +184,16 @@ nothing rather than stale state — and `Requires=` stops it starting at all.
      with a non-deterministic index
    - **aborts unless the filesystem UUID matches**; never formats
    - mounts, then verifies sentinel paths or unmounts and fails
+   - runs `restorecon -R` on the mount point to reset SELinux labels. This walks
+     every file, so it is the slowest step: several minutes on a home
+     directory holding ~100 GiB
 3. `kirocrew.service` starts the application (gated on step 2 succeeding, and on
    `user@<uid>.service` for per-agent `systemd-run --user` scopes, which needs
    `loginctl enable-linger`)
 4. `kirocrew-tmux.service` opens the log session
-5. `kirocrew-spot-watch.service` begins polling IMDS
+5. `kirocrew-spot-watch.service` begins polling IMDS every 5 s for an
+   interruption notice or a rebalance recommendation. It is ordered after the
+   application, so it is not running while step 2 is still in progress
 
 ## Interruption sequence
 
@@ -192,8 +204,35 @@ nothing rather than stale state — and `Requires=` stops it starting at all.
 | T−0 | Instance terminates; the disposable root is deleted with it |
 | T+10s | ASG launches a replacement from the best-priced available pool |
 | T+60s | Storage unit attaches, verifies, mounts |
-| T+90s | Application starts; tmux session recreated |
-| T+2-4min | Service restored with all state intact |
+| T+1-7min | `restorecon -R` relabels the home directory; time depends on file count |
+| T+3-8min | Application starts; tmux session recreated. Service restored with all state intact |
+
+## Known limitations of the instance scripts
+
+**A rebalance recommendation stops the gateway early.** The watcher drains on a
+rebalance recommendation as well as on the 2-minute notice. A rebalance
+recommendation only means the risk of interruption went up. The instance may
+keep running for a long time. After the drain, the gateway is stopped and the
+volume is detached, but the instance stays up until the ASG replaces it. If the
+ASG cannot launch a replacement (for example, one instance type with no spare
+capacity), the gateway stays down that whole time.
+
+**The watcher repeats the drain.** The script exits after a drain and systemd
+restarts it 15 s later (`Restart=always`). IMDS keeps returning the rebalance
+recommendation, so the watcher drains again, about every 26 s. Each round calls
+`DetachVolume` on the data volume without naming an instance. If a replacement
+attaches the volume while the old instance is still alive, the old watcher can
+detach it from the replacement. The replacement's storage unit then fails and
+self-heal replaces it again.
+
+**No drain during boot.** The watcher only starts after the application. An
+instance interrupted while its storage unit is still attaching or relabelling
+is not drained. The next instance waits for it to terminate, then force-detaches.
+
+**The storage timeout can run out.** `kirocrew-storage.service` has
+`TimeoutStartSec=900`. Attach retries can use up to 600 s, and `restorecon -R`
+grows with the data. If both are slow, the unit times out and self-heal replaces
+an instance that was about to work.
 
 ## Deliberate omissions
 

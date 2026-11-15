@@ -1,105 +1,121 @@
 # Self-healing spot instance for an always-on gateway
 
-Runs a stateful, always-on service (here: the KiroCrew Discord/Slack gateway) on
-an EC2 **spot** instance that AWS can reclaim at any time, and gets it back
-automatically — same data, no manual steps — for roughly a third of the
-on-demand price.
+This repo runs the KiroCrew Discord/Slack gateway on an EC2 spot instance. Spot
+costs about a third of the on-demand price, but AWS can take the instance back
+at any time. When that happens, this setup brings the gateway back by itself,
+with the same data and no manual steps.
 
 ## What it does
 
-- AWS reclaims the spot instance → an Auto Scaling group launches a replacement
-- The replacement **re-attaches the same EBS data volume** and mounts it at the
-  application user's home directory
-- systemd starts the gateway; a `tmux` session is recreated for log watching
-- Total gap: **2-4 minutes**, unattended
-- A 2-minute interruption notice triggers a clean drain (stop, sync, unmount,
-  detach) so the next instance does not have to force-detach or replay a journal
-- If storage cannot be attached, the instance marks itself Unhealthy so the ASG
-  replaces it — instead of sitting there "healthy" with a dead application
+When AWS takes the spot instance back, an Auto Scaling group (ASG) launches a
+new one. The new instance attaches the same EBS data volume and mounts it as the
+app user's home directory. systemd then starts the gateway, and a `tmux`
+session opens so you can watch the logs.
 
-## What it does not do
+The gateway is usually back within 3 to 8 minutes, with nobody touching it. Most
+of that time goes to `restorecon -R`, which resets file security labels after
+the mount. It takes longer as the number of files on the volume grows.
 
-- **Zero downtime.** A single EBS volume attaches to one instance at a time, so
-  there is always a gap. See `docs/01-architecture.md`.
-- **Survive an AZ-wide capacity shortage.** The volume pins you to one
-  Availability Zone. If every configured instance type is unavailable there, you
-  are down until capacity returns (the ASG keeps retrying on its own).
-- **Suit every workload.** AWS explicitly does not recommend spot for stateful,
-  fault-intolerant workloads. This design manages that risk; it does not remove
-  it. Read `docs/05-cost-and-tradeoffs.md` before adopting it.
+Before the old instance goes away, a watcher script stops the gateway, flushes
+writes to disk, unmounts the volume and detaches it. This means the next
+instance gets a clean disk and doesn't have to force it loose. The watcher does
+this on a 2-minute interruption notice and also on a rebalance recommendation.
+Read the rebalance warning in `docs/01-architecture.md` before you rely on it.
+
+If the new instance can't attach the volume, it marks itself Unhealthy. The ASG
+then replaces it, so you don't end up with an instance that looks fine while the
+gateway is dead.
+
+## What it doesn't do
+
+It doesn't give you zero downtime. An EBS volume attaches to one instance at a
+time, so there is always a gap while it moves. `docs/01-architecture.md`
+explains why.
+
+It can't ride out a capacity shortage in your Availability Zone (AZ). The volume
+lives in one AZ, so every instance has to launch there too. If none of your
+instance types are available in that AZ, the gateway stays down until capacity
+comes back. The ASG keeps retrying on its own. This happens far more often if
+the ASG allows only one instance type, because launches fail with
+`UnfulfillableCapacity` until that one type frees up. List several.
+
+It isn't right for every workload. AWS says spot is a poor fit for stateful
+services that can't tolerate interruptions. This setup reduces that risk but
+doesn't remove it. Read `docs/05-cost-and-tradeoffs.md` before you adopt it.
 
 ## Documentation
 
 | Document | Read it when |
 |---|---|
-| [`docs/01-architecture.md`](docs/01-architecture.md) | You want to understand *why* it is built this way, and the constraints that forced each decision |
-| [`docs/02-setup-guide.md`](docs/02-setup-guide.md) | You are deploying it, from an existing single-instance setup or from scratch |
-| [`docs/03-operations.md`](docs/03-operations.md) | It is running and you need to attach to logs, deploy code, resize, or rebuild the AMI |
+| [`docs/01-architecture.md`](docs/01-architecture.md) | You want to know why it is built this way |
+| [`docs/02-setup-guide.md`](docs/02-setup-guide.md) | You are deploying it, either moving an existing instance or starting fresh |
+| [`docs/03-operations.md`](docs/03-operations.md) | It is running and you need to read logs, deploy code, resize, or rebuild the AMI |
 | [`docs/04-troubleshooting.md`](docs/04-troubleshooting.md) | Something is broken |
-| [`docs/05-cost-and-tradeoffs.md`](docs/05-cost-and-tradeoffs.md) | You are deciding whether spot is the right call, or want to reduce the bill |
+| [`docs/05-cost-and-tradeoffs.md`](docs/05-cost-and-tradeoffs.md) | You are deciding whether spot is worth it, picking a size, or trying to cut the bill |
 
 ## Repository layout
 
 ```
-config.env.example            all deployment values in one place; copy to config.env
+config.env.example            every deployment setting; copy it to config.env
 docs/                         the five documents above
 scripts/
-  build-ami.sh                runs on a throwaway builder; bakes the AMI
-  migrate-home.sh             two-pass rsync of an existing home onto the volume
+  build-ami.sh                runs on a temporary instance and builds the AMI
+  migrate-home.sh             copies an existing home directory onto the volume in two passes
   instance/
-    kirocrew-storage.sh       attach + mount the data volume, every boot
-    kirocrew-spot-watch.sh    drain cleanly on an interruption notice
-    kirocrew-selfheal.sh      mark Unhealthy so the ASG replaces a broken instance
+    kirocrew-storage.sh       attaches and mounts the data volume on every boot
+    kirocrew-spot-watch.sh    stops the gateway and detaches the volume before shutdown
+    kirocrew-selfheal.sh      marks the instance Unhealthy so the ASG replaces it
   systemd/
-    kirocrew-storage.service  ordering + OnFailure wiring
-    kirocrew.service          the application, Restart=always
-    kirocrew-tmux.service     attachable log session
+    kirocrew-storage.service  runs the storage script, calls self-heal if it fails
+    kirocrew.service          the gateway itself, restarted whenever it exits
+    kirocrew-tmux.service     the tmux session for watching logs
     kirocrew-spot-watch.service
-    kirocrew-selfheal.service static; only reachable via OnFailure
+    kirocrew-selfheal.service only runs when the storage unit fails
 templates/
   iam-trust-policy.json
-  iam-instance-policy.json    least-privilege, with an explicit Deny backstop
+  iam-instance-policy.json    minimum permissions, plus a Deny on destructive actions
   launch-template.json
   asg.json
 ```
 
-## Prerequisites
+## What you need
 
-- An AWS account, and the AWS CLI v2 authenticated with permissions for EC2,
-  Auto Scaling, IAM, SSM and CloudWatch
-- One VPC subnet in the AZ where the data volume will live, with a route to an
-  internet gateway (the application needs outbound access; nothing inbound is
-  required)
-- Amazon Linux 2023 x86_64 as the base AMI. Other distributions work but the
-  package names, `/etc/systemd` paths and NVMe device symlinks in the scripts
-  assume AL2023.
-- A workload whose state lives entirely under one directory tree
+- An AWS account, and the AWS CLI v2 logged in with access to EC2, Auto
+  Scaling, IAM, SSM and CloudWatch.
+- One subnet in the AZ where the data volume will live. It needs a route to an
+  internet gateway, because the gateway connects out. Nothing needs to connect
+  in.
+- Amazon Linux 2023 (x86_64) as the base AMI. Other Linux versions can work, but
+  the scripts assume Amazon Linux 2023 package names, systemd paths and disk
+  device names.
+- An app that keeps all its state under one directory.
 
-## Quick start
+## Getting started
 
 ```bash
 cp config.env.example config.env
-$EDITOR config.env                 # fill in region, AZ, subnet, SG, account id
+$EDITOR config.env                 # set region, AZ, subnet, security group, account id
 ```
 
-Then follow [`docs/02-setup-guide.md`](docs/02-setup-guide.md) in order. It is
-written so that every destructive step comes after a verification step, and so
-that the only outage is a single planned cutover window.
+Then work through [`docs/02-setup-guide.md`](docs/02-setup-guide.md) in order.
+Every step that deletes or overwrites something comes after a step that checks
+it is safe. The only downtime is one planned cutover at the end.
 
-## Design notes worth knowing before you start
+## Things to know before you start
 
-1. **The data volume must not be a root volume.** If your state currently lives
-   on the instance's boot disk, you cannot re-attach that disk to a replacement
-   — a launch template always creates a fresh root volume from the AMI. Step 3
-   of the setup guide migrates state onto a dedicated volume.
-2. **Mount the volume at the application user's home directory.** Virtualenvs,
-   shebangs and toolchain installs bake in absolute paths. Mounting at the
-   original path means nothing needs rewriting.
-3. **Give the data volume its own filesystem UUID.** A volume created from an
-   AMI snapshot carries the *same* filesystem UUID as every instance's root
-   volume from that AMI. Two disks with one UUID makes XFS refuse to mount and
-   can make the initramfs pick the wrong root after a reboot. A freshly created
-   and formatted volume avoids the whole class of problem.
-4. **The attach/mount logic belongs in a systemd unit, not user-data.**
-   User-data runs once per instance; a reboot would leave the volume unmounted
-   and the application dead.
+1. **Your data can't stay on the boot disk.** A launch template always creates a
+   fresh boot disk from the AMI. You can't hand an old boot disk to a new
+   instance. If your state lives on the boot disk today, step 3 of the setup
+   guide moves it to its own volume.
+2. **Mount the volume at the app user's home directory.** Virtualenvs, scripts
+   and installed tools store full paths to files in the home directory. If the
+   volume mounts at the same path, all of those paths keep working.
+3. **Create the data volume fresh. Don't make it from a snapshot.** A volume
+   made from an AMI snapshot has the same filesystem ID (UUID) as the boot disk
+   of every instance built from that AMI. With two disks sharing one UUID, XFS
+   refuses to mount the second one. After a reboot, Linux can also boot from the
+   wrong disk. A new, freshly formatted volume gets its own UUID, so neither
+   problem can happen.
+4. **Attach and mount the volume from a systemd unit, not user-data.** User-data
+   runs only on an instance's first boot. After a reboot the volume would stay
+   unmounted and the gateway would not start.

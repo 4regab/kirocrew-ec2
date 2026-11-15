@@ -60,7 +60,7 @@ Two findings commonly change the plan:
 Also measure real memory and CPU use (`free -m`, `uptime`) before choosing
 instance types. Do not assume the current size is right in either direction.
 
-## Step 2 — IAM role and instance profile
+## Step 2 — IAM role, instance profile and security group
 
 ```bash
 aws iam create-role --role-name $IAM_ROLE_NAME \
@@ -83,6 +83,23 @@ replacement instances get a new public IP every time, and SSM does not care.
 > access, the agent may not pick it up for a long time — it backs off after
 > repeated credential failures. Force it with
 > `sudo systemctl restart amazon-ssm-agent`.
+
+### Security group
+
+The gateway only connects outbound, so the group needs no inbound rules. A new
+group allows all outbound traffic by default.
+
+```bash
+aws ec2 create-security-group --region $AWS_REGION \
+  --group-name kirocrew-gateway-sg \
+  --description "kirocrew gateway - outbound only" \
+  --vpc-id <vpc-of-SUBNET_ID> --query GroupId --output text
+# -> SECURITY_GROUP_ID
+
+# Optional: SSH from your own address only. SSM needs no inbound rule.
+aws ec2 authorize-security-group-ingress --region $AWS_REGION \
+  --group-id $SECURITY_GROUP_ID --protocol tcp --port 22 --cidr <your-ip>/32
+```
 
 ## Step 3 — Create and format the data volume
 
@@ -339,6 +356,12 @@ aws sns create-topic --name kirocrew-alerts --query TopicArn --output text
 aws sns subscribe --topic-arn <arn> --protocol email --notification-endpoint $ALARM_EMAIL
 # confirm via the email you receive
 
+# The ASG only publishes group metrics once collection is on. Without this the
+# alarm below gets no data, and with treat-missing-data=breaching it always fires.
+aws autoscaling enable-metrics-collection --region $AWS_REGION \
+  --auto-scaling-group-name $ASG_NAME \
+  --metrics GroupInServiceInstances --granularity 1Minute
+
 aws cloudwatch put-metric-alarm --alarm-name kirocrew-gateway-down \
   --namespace AWS/AutoScaling --metric-name GroupInServiceInstances \
   --dimensions Name=AutoScalingGroupName,Value=$ASG_NAME \
@@ -348,7 +371,9 @@ aws cloudwatch put-metric-alarm --alarm-name kirocrew-gateway-down \
 ```
 
 This is the backstop for the failure mode nothing else catches: capacity
-unavailable across every instance type in your AZ.
+unavailable across every instance type in your AZ. It does not catch a gateway
+that is down on a running instance, such as after a rebalance drain (see
+`01-architecture.md`), because the instance still counts as InService.
 
 Once you are satisfied — days, not minutes — delete the old volume and the
 pre-migration snapshot, and deregister superseded AMIs with their snapshots.

@@ -3,7 +3,7 @@
 
   "AutoScalingGroupName": "ASG_NAME",
 
-  "_comment_size": "Min=Max=Desired=1 after cutover. Max MUST be 1: a non-Multi-Attach EBS volume attaches to exactly one instance, so two instances would fight over it (and, for a chat gateway, would open two connections on the same bot token). The cost of Max=1 is that a replacement cannot launch until the old instance is gone, so expect a 2-4 minute gap per interruption. That gap is inherent to single-volume designs, not a bug.",
+  "_comment_size": "Min=Max=Desired=1 after cutover. Max MUST be 1: a non-Multi-Attach EBS volume attaches to exactly one instance, so two instances would fight over it (and, for a chat gateway, would open two connections on the same bot token). With CapacityRebalance on, the ASG may briefly launch a second instance on a rebalance recommendation; its storage unit refuses to take the volume until the old instance stops. Expect a gap of about 3-8 minutes per interruption. That gap is inherent to single-volume designs, not a bug.",
   "MinSize": 0,
   "MaxSize": 1,
   "DesiredCapacity": 0,
@@ -24,20 +24,20 @@
         "LaunchTemplateName": "LAUNCH_TEMPLATE_NAME",
         "Version": "$Latest"
       },
-      "_comment_overrides": "All entries must share the AMI's architecture and have enough memory for the workload. More types = more capacity pools = faster recovery. Burstable (t3/t3a) types are included as a fallback but will throttle a sustained-CPU workload once credits run out.",
+      "_comment_overrides": "All entries must share the AMI's architecture and have enough memory for the workload. More types = more capacity pools = faster recovery. Burstable (t3/t3a) types run on CPU credits: in standard mode they throttle once credits run out, in unlimited mode (the t3/t3a default) AWS bills the extra CPU.",
       "Overrides": [
-        { "InstanceType": "m5.xlarge" },
-        { "InstanceType": "m6i.xlarge" },
-        { "InstanceType": "m6a.xlarge" },
-        { "InstanceType": "m5a.xlarge" },
-        { "InstanceType": "m5n.xlarge" },
-        { "InstanceType": "m5d.xlarge" },
-        { "InstanceType": "m7i.xlarge" },
-        { "InstanceType": "m7a.xlarge" },
-        { "InstanceType": "m6in.xlarge" },
-        { "InstanceType": "t3.xlarge" },
-        { "InstanceType": "t3a.xlarge" },
-        { "InstanceType": "m4.xlarge" }
+        { "InstanceType": "m5.2xlarge" },
+        { "InstanceType": "m6i.2xlarge" },
+        { "InstanceType": "m6a.2xlarge" },
+        { "InstanceType": "m5a.2xlarge" },
+        { "InstanceType": "m5n.2xlarge" },
+        { "InstanceType": "m5d.2xlarge" },
+        { "InstanceType": "m7i.2xlarge" },
+        { "InstanceType": "m7a.2xlarge" },
+        { "InstanceType": "m6in.2xlarge" },
+        { "InstanceType": "t3.2xlarge" },
+        { "InstanceType": "t3a.2xlarge" },
+        { "InstanceType": "m4.2xlarge" }
       ]
     },
     "InstancesDistribution": {

@@ -96,10 +96,12 @@ Prefer non-burstable families for sustained-CPU workloads: burstable types
 throttle to their baseline once credits are exhausted, which on a busy box can
 be a large and confusing slowdown for a few percent saved.
 
-**Data volume.** gp3 grows online:
+**Data volume.** gp3 grows online. Check free space now and then
+(`df -h $MOUNT_POINT`): session data, caches and old virtualenvs accumulate
+under the home directory.
 
 ```bash
-aws ec2 modify-volume --region $AWS_REGION --volume-id $DATA_VOLUME_ID --size 80
+aws ec2 modify-volume --region $AWS_REGION --volume-id $DATA_VOLUME_ID --size 150
 # then, on the instance:
 sudo xfs_growfs $MOUNT_POINT
 ```

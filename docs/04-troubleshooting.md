@@ -43,6 +43,29 @@ Match the log line to a cause:
 | `FATAL: expected state missing: …` | Volume mounted, but application state is absent | You mounted the wrong volume, or the migration never completed. Check the sentinel paths in `APP_SENTINEL_PATHS` |
 | `attach call failed, will retry` repeatedly | IAM | Confirm `ec2:AttachVolume` covers **both** the volume ARN and `instance/*` |
 
+## Gateway stopped but the instance is still running
+
+Check the watcher:
+
+```bash
+journalctl -u kirocrew-spot-watch --no-pager -n 20
+```
+
+If it shows `INTERRUPTION SIGNAL action=404 rebalance=200 - draining`, the
+instance got a rebalance recommendation, not an interruption notice. The watcher
+stopped the gateway and detached the volume, and the instance may keep running
+for a long time. See "Known limitations" in `01-architecture.md`.
+
+Replace the instance instead of waiting:
+
+```bash
+aws autoscaling terminate-instance-in-auto-scaling-group \
+  --instance-id <current> --no-should-decrement-desired-capacity
+```
+
+If `describe-scaling-activities` shows repeated `UnfulfillableCapacity`, the
+replacement cannot launch either. Add more instance types to the overrides.
+
 ## The instance keeps getting replaced in a loop
 
 Self-heal is doing its job against a permanent fault. Every ~11 minutes: storage
