@@ -146,8 +146,10 @@ Roughly $0.05/GiB-month for changed blocks. Cheap relative to what it protects.
 
 ## Recommended follow-ups
 
-**Encrypt the data volume.** It holds credentials and application state. EBS
-cannot encrypt in place; the migration is snapshot → copy-snapshot with
+**Encrypt an older data volume.** Setup step 3 creates the volume encrypted.
+If yours was made before that, check it with
+`aws ec2 describe-volumes --volume-ids $DATA_VOLUME_ID --query 'Volumes[0].Encrypted'`.
+EBS cannot encrypt in place; the migration is snapshot → copy-snapshot with
 encryption → new volume → swap during a maintenance window.
 
 **Set a default region.** Every command here needs `--region`, because the data

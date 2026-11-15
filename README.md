@@ -53,8 +53,9 @@ Source file: [`docs/architecture.drawio`](docs/architecture.drawio). Open it in
 1. The gateway runs on one spot instance inside an Auto Scaling group (ASG) with
    min 1 and max 1. It only connects out to Discord or Slack. Nothing connects
    in.
-2. All state lives on one EBS data volume, mounted at the app user's home
-   directory. The instance's boot disk is thrown away with the instance.
+2. All state lives on one encrypted EBS data volume, mounted at the app user's
+   home directory. The instance's boot disk is also encrypted, and it is thrown
+   away with the instance.
 3. When AWS takes the instance back, the ASG launches a new one. On boot it
    attaches the same volume, mounts it, and systemd starts the gateway and a
    `tmux` session for the logs.
@@ -97,6 +98,7 @@ day. Your real bill moves within roughly the range above.
 | Boot volume, 20 GiB gp3 (replaced with each instance) | $0.08/GiB-month | $1.60 |
 | AMI snapshot (only used blocks are billed) | $0.05/GiB-month | ~$0.50 |
 | CloudWatch alarm | $0.10/alarm (first 10 alarms are free) | $0 to $0.10 |
+| EBS encryption with the AWS managed key `aws/ebs` | Free | $0 |
 | ASG group metrics for the alarm | Free | $0 |
 | SNS email alerts | First 1,000 emails free | $0 |
 | Systems Manager Session Manager | Free for EC2 | $0 |
@@ -196,6 +198,8 @@ You are done when all of these are true:
 - On the instance, `systemctl is-active kirocrew-storage kirocrew kirocrew-tmux kirocrew-spot-watch`
   prints `active` four times.
 - The gateway answers in Discord or Slack.
+- `aws ec2 describe-volumes --volume-ids $DATA_VOLUME_ID --query 'Volumes[0].Encrypted'`
+  prints `true`.
 - After you terminate the instance on purpose (setup step 9), a new one comes
   back with the same data, and two instances never run at once.
 

@@ -12,12 +12,14 @@
     "SecurityGroupIds": ["SECURITY_GROUP_ID"],
 
     "_comment_bdm": "ONLY the root device. The data volume must NOT appear here - a block device mapping would create a brand-new empty volume on every launch, which is exactly the duplicate storage this design avoids. It is attached at boot via the EC2 API instead, which also means its attachment defaults to DeleteOnTermination=false.",
+    "_comment_encryption": "Encrypted=true encrypts each new boot disk with the AWS managed key aws/ebs. Auto Scaling needs no extra permission for that key.",
     "BlockDeviceMappings": [
       {
         "DeviceName": "/dev/xvda",
         "Ebs": {
           "VolumeSize": 20,
           "VolumeType": "gp3",
+          "Encrypted": true,
           "DeleteOnTermination": true
         }
       }

@@ -105,13 +105,32 @@ aws ec2 authorize-security-group-ingress --region $AWS_REGION \
 
 ```bash
 aws ec2 create-volume --region $AWS_REGION --availability-zone $AZ \
-  --size $DATA_VOLUME_SIZE_GIB --volume-type gp3 \
+  --size $DATA_VOLUME_SIZE_GIB --volume-type gp3 --encrypted \
   --tag-specifications 'ResourceType=volume,Tags=[{Key=Name,Value=kirocrew-data}]' \
   --query VolumeId --output text
 
 aws ec2 attach-volume --region $AWS_REGION --volume-id $DATA_VOLUME_ID \
   --instance-id <existing-instance> --device $ATTACH_DEVICE
 ```
+
+`--encrypted` encrypts the volume with the AWS managed key `aws/ebs`. The
+volume holds your bot tokens and agent state, so keep it on. It is free, has no
+noticeable speed cost, and needs no IAM or key policy changes. Snapshots and
+clones of the volume stay encrypted. EBS can't encrypt a volume after it is
+created, so add the flag now. Confirm it:
+
+```bash
+aws ec2 describe-volumes --region $AWS_REGION --volume-ids $DATA_VOLUME_ID \
+  --query 'Volumes[0].Encrypted'          # must print true
+```
+
+> **Optional:** `aws ec2 enable-ebs-encryption-by-default --region $AWS_REGION`
+> encrypts every new volume in the region, not just these ones. Only run it if
+> that suits the rest of your account.
+>
+> If you pass `--kms-key-id` to use your own customer managed key, you must also
+> allow the instance role and the Auto Scaling service-linked role to use it in
+> the key policy. That key costs $1 a month.
 
 Attaching a second disk to a running instance is non-disruptive.
 
@@ -177,9 +196,13 @@ aws ec2 run-instances --region $AWS_REGION --image-id $BASE_AMI \
   --security-group-ids $SECURITY_GROUP_ID \
   --iam-instance-profile Name=$INSTANCE_PROFILE_NAME \
   --metadata-options HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2 \
+  --block-device-mappings 'DeviceName=/dev/xvda,Ebs={Encrypted=true}' \
   --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=ami-builder}]' \
   --query 'Instances[0].InstanceId' --output text
 ```
+
+The `--block-device-mappings` line encrypts the builder's boot disk, so the AMI
+and its snapshot come out encrypted too.
 
 Copy `config.env`, `scripts/build-ami.sh`, `scripts/instance/` and
 `scripts/systemd/` to `/tmp/kirocrew-build/` on the builder, then run it as
@@ -263,7 +286,9 @@ Four things to confirm on that test instance:
    upstream service, no start against empty state.
 3. **`/run/user/<uid>` exists**, proving linger works from the AMI.
 4. Then point a *copy* of the storage script at the clone volume id and run it.
-   Confirm it mounts, and that the runtime resolves from the mounted volume:
+   Confirm it mounts, and that the runtime resolves from the mounted volume.
+   The clone comes from an encrypted snapshot, so it is encrypted too. A
+   successful mount proves the instance role can attach encrypted volumes:
 
 ```bash
 sudo -u $APP_USER $APP_EXEC --version

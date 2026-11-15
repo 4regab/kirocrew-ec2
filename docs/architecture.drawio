@@ -40,7 +40,7 @@
         <mxCell id="instance" value="Spot EC2 instance&lt;br&gt;gateway + systemd units" style="sketch=0;outlineConnect=0;fontColor=#232F3E;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;fillColor=#ED7100;strokeColor=none;shape=mxgraph.aws4.spot_instance;verticalLabelPosition=top;verticalAlign=bottom;" vertex="1" parent="asg">
           <mxGeometry x="51" y="80" width="78" height="78" as="geometry" />
         </mxCell>
-        <mxCell id="ebs" value="EBS data volume (gp3)&lt;br&gt;mounted at /home/ec2-user" style="sketch=0;outlineConnect=0;fontColor=#232F3E;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;fillColor=#7AA116;strokeColor=#ffffff;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_block_store;" vertex="1" parent="az">
+        <mxCell id="ebs" value="EBS data volume (gp3, encrypted)&lt;br&gt;mounted at /home/ec2-user" style="sketch=0;outlineConnect=0;fontColor=#232F3E;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;fillColor=#7AA116;strokeColor=#ffffff;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_block_store;" vertex="1" parent="az">
           <mxGeometry x="630" y="160" width="78" height="78" as="geometry" />
         </mxCell>
         <mxCell id="ami" value="Custom AMI +&lt;br&gt;launch template" style="sketch=0;outlineConnect=0;fontColor=#232F3E;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;fillColor=#ED7100;strokeColor=none;shape=mxgraph.aws4.ami;" vertex="1" parent="region">

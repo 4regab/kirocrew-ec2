@@ -240,8 +240,11 @@ an instance that was about to work.
   only on localhost. A public IPv4 costs the same whether it is an EIP or
   auto-assigned; going private would need a NAT gateway or interface endpoints,
   both more expensive than the address.
-- **No encryption on the data volume**, matching the source setup. Enabling it
-  is a good idea and is noted as a follow-up in `03-operations.md`.
+- **Encryption uses the AWS managed key `aws/ebs`**, not a customer managed
+  key. The data volume, boot disks and AMI are all encrypted. The managed key is
+  free and needs no key policy work. A customer managed key adds $1 a month and
+  key policy entries for the instance role and the Auto Scaling service-linked
+  role.
 - **No spot-to-on-demand fallback.** An ASG has no automatic fallback; the only
   real option is a permanent on-demand base of 1, which for a single-instance
   workload just means paying on-demand.
