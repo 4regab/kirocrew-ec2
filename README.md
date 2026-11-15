@@ -11,7 +11,7 @@ comfortable with the AWS CLI and Linux.
 
 | | |
 |---|---|
-| **Cost** | About $53 to $79 a month in us-east-1, depending on instance size |
+| **Cost** | About $50 (16 GiB) or $75 (32 GiB) a month on spot in us-east-1, vs $154 or $233 on demand |
 | **Recovery after an interruption** | Usually 3 to 8 minutes, with nobody touching it |
 | **Planned downtime to set up** | One cutover. Budget 10 minutes |
 | **AWS services** | EC2 (spot), EC2 Auto Scaling, EBS, IAM, Systems Manager, CloudWatch, SNS |
@@ -72,22 +72,66 @@ For why it is built this way, read
 
 ## Costs
 
-This tutorial uses billable AWS resources. Example for us-east-1 with the
-template defaults (8 vCPU / 32 GiB):
+This tutorial uses billable AWS resources. The prices below are for us-east-1
+(N. Virginia), Linux, 730 hours a month. On-demand prices come from the AWS
+Pricing API. Spot prices come from `describe-spot-price-history`, checked on
+2026-11-15. Spot prices move every hour, so check yours before you start.
 
-| Item | Monthly |
-|---|---|
-| Spot instance (t3a.2xlarge at about $0.09/hr) | ~$66 |
-| Public IPv4 address | $3.65 |
-| Data volume, 100 GiB gp3 | $8.00 |
-| Boot volume, 20 GiB gp3 | $1.60 |
-| ASG, launch template, IAM, CloudWatch alarm, SNS | $0 |
-| **Total** | **~$79** |
+### Instance: on demand vs spot
 
-A 4 vCPU / 16 GiB size costs about $53 a month. The same 32 GiB instance on
-demand costs about $220 a month. Prices change. See
-[`docs/05-cost-and-tradeoffs.md`](docs/05-cost-and-tradeoffs.md) for how to
-check current prices and pick a size.
+| Size | Main type | On demand | Spot, us-east-1d | Spot, cheapest to dearest AZ | Saving with spot |
+|---|---|---|---|---|---|
+| 4 vCPU / 16 GiB | `m5.xlarge` | $0.192/hr = **$140.16** | $0.0497/hr = **$36.28** | $26.13 to $43.51 | ~74% |
+| 8 vCPU / 32 GiB (template default) | `t3a.2xlarge` | $0.3008/hr = **$219.58** | $0.0839/hr = **$61.25** | $42.56 to $77.09 | ~72% |
+
+The ASG can land on any of the 12 instance types in your list, not only the
+main type. For example, `m5.2xlarge` spot was $0.12 to $0.17/hr on the same
+day. Your real bill moves within roughly the range above.
+
+### Everything else this setup creates
+
+| Item | Price | Monthly |
+|---|---|---|
+| Public IPv4 address | $0.005/hr | $3.65 |
+| Data volume, 100 GiB gp3 | $0.08/GiB-month | $8.00 |
+| Boot volume, 20 GiB gp3 (replaced with each instance) | $0.08/GiB-month | $1.60 |
+| AMI snapshot (only used blocks are billed) | $0.05/GiB-month | ~$0.50 |
+| CloudWatch alarm | $0.10/alarm (first 10 alarms are free) | $0 to $0.10 |
+| ASG group metrics for the alarm | Free | $0 |
+| SNS email alerts | First 1,000 emails free | $0 |
+| Systems Manager Session Manager | Free for EC2 | $0 |
+| EC2 Auto Scaling, launch template, IAM, security group | Free | $0 |
+| **Fixed extras** | | **~$13.85** |
+
+### Monthly total
+
+| Size | On demand | Spot (us-east-1d) | You save |
+|---|---|---|---|
+| 16 GiB | ~$154 | **~$50** | ~$104 a month |
+| 32 GiB | ~$233 | **~$75** | ~$158 a month |
+
+Both columns include the same ~$13.85 of fixed extras.
+
+### Costs that depend on how you use it
+
+- **Data transfer out:** the first 100 GB a month is free, then $0.09/GB. A
+  chat gateway usually stays under that.
+- **CPU credits on t3/t3a:** these types run in `unlimited` mode by default. If
+  average CPU stays above the baseline, AWS adds $0.05 per vCPU-hour. Watch
+  `CPUSurplusCreditsCharged` in CloudWatch.
+- **Snapshots:** the pre-migration snapshot and optional daily backups cost
+  $0.05/GiB-month of stored blocks. Delete the pre-migration snapshot once you
+  are happy with the setup.
+- **AMI builds:** the builder `t3.small` costs about $0.02/hr while it runs.
+  Each AMI you keep adds its own snapshot.
+
+**Is it worth it?** You save about $100 to $160 a month. In return, the gateway
+goes down for 3 to 8 minutes whenever AWS takes the instance back. It can stay
+down longer if no spot capacity is free in your AZ. If that downtime would cost
+you more than the saving, run on demand. See
+[`docs/05-cost-and-tradeoffs.md`](docs/05-cost-and-tradeoffs.md) for the
+trade-offs, how to pick a size, and the command to check spot prices for your
+own AZ.
 
 To stop paying, follow [Clean up](#clean-up).
 
